@@ -37,9 +37,16 @@ def get_node_status(node):
     return json.loads(out)
 
 
-def get_temperatures():
-    """Read temperatures via lm-sensors (if installed)."""
+def get_hwmon_readings():
+    """Read temperature and fan readings via lm-sensors (if installed).
+
+    lm-sensors JSON keys carry the real measurement type as a prefix
+    (e.g. "temp1_input" vs "fan1_input"), so that prefix - not the free-text
+    label - is what decides whether a reading is a temperature or a fan
+    speed. Any other kind of reading (voltages, etc.) is ignored.
+    """
     temps = {}
+    fans = {}
     try:
         out = subprocess.check_output(["sensors", "-j"], stderr=subprocess.DEVNULL)
         data = json.loads(out)
@@ -48,13 +55,17 @@ def get_temperatures():
                 if not isinstance(values, dict):
                     continue
                 for k, v in values.items():
-                    if k.endswith("_input") and isinstance(v, (int, float)):
-                        clean_label = f"{chip}_{label}".replace(" ", "_").replace(":", "").lower()
-                        clean_label = "".join(c for c in clean_label if c.isalnum() or c == "_")
+                    if not isinstance(v, (int, float)) or not k.endswith("_input"):
+                        continue
+                    clean_label = f"{chip}_{label}".replace(" ", "_").replace(":", "").lower()
+                    clean_label = "".join(c for c in clean_label if c.isalnum() or c == "_")
+                    if k.startswith("temp"):
                         temps[clean_label] = round(v, 1)
+                    elif k.startswith("fan"):
+                        fans[clean_label] = round(v)
     except (FileNotFoundError, subprocess.CalledProcessError, json.JSONDecodeError):
         pass
-    return temps
+    return temps, fans
 
 
 def get_disk_usage_root():
@@ -85,8 +96,11 @@ def build_payload(node):
         "loadavg_1m": loadavg,
         "disk_pct_root": get_disk_usage_root(),
     }
-    for k, v in get_temperatures().items():
+    temps, fans = get_hwmon_readings()
+    for k, v in temps.items():
         payload[f"temp_{k}"] = v
+    for k, v in fans.items():
+        payload[f"fan_{k}"] = v
     return payload
 
 
@@ -115,7 +129,7 @@ def publish_discovery(cfg, node, sensors):
         "model": "PVE Node",
     }
     state_topic = f"{cfg['MQTT_TOPIC_PREFIX']}/{node}/state"
-    for key, unit, device_class in sensors:
+    for key, unit, device_class, icon in sensors:
         obj_id = f"pve_{node}_{key}"
         config_topic = f"homeassistant/sensor/{obj_id}/config"
         config_payload = {
@@ -129,6 +143,8 @@ def publish_discovery(cfg, node, sensors):
             config_payload["unit_of_measurement"] = unit
         if device_class:
             config_payload["device_class"] = device_class
+        if icon:
+            config_payload["icon"] = icon
         mqtt_publish(cfg, config_topic, json.dumps(config_payload), retain=True)
 
 
@@ -144,16 +160,21 @@ def main():
     marker = os.path.join(STATE_DIR, f".discovery_{node}")
     if cfg.get("HA_DISCOVERY", "true").lower() == "true" and not os.path.exists(marker):
         base_sensors = [
-            ("cpu_percent", "%", None),
-            ("mem_percent", "%", None),
-            ("mem_used_gb", "GB", None),
-            ("mem_total_gb", "GB", None),
-            ("uptime_hours", "h", None),
-            ("loadavg_1m", None, None),
-            ("disk_pct_root", "%", None),
+            ("cpu_percent", "%", None, None),
+            ("mem_percent", "%", None, None),
+            ("mem_used_gb", "GB", None, None),
+            ("mem_total_gb", "GB", None, None),
+            ("uptime_hours", "h", None, None),
+            ("loadavg_1m", None, None, None),
+            ("disk_pct_root", "%", None, None),
         ]
-        temp_sensors = [(k, "°C", "temperature") for k in payload if k.startswith("temp_")]
-        publish_discovery(cfg, node, base_sensors + temp_sensors)
+        temp_sensors = [
+            (k, "°C", "temperature", None) for k in payload if k.startswith("temp_")
+        ]
+        fan_sensors = [
+            (k, "RPM", None, "mdi:fan") for k in payload if k.startswith("fan_")
+        ]
+        publish_discovery(cfg, node, base_sensors + temp_sensors + fan_sensors)
         with open(marker, "w") as f:
             f.write("done\n")
 
