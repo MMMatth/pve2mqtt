@@ -68,6 +68,43 @@ def get_hwmon_readings():
     return temps, fans
 
 
+def get_cpu_percent():
+    """Compute CPU usage percent from /proc/stat deltas since the last run.
+
+    Proxmox's own "cpu" field (from `pvesh get .../status`) is an instantaneous
+    two-sample snapshot that has been observed to always read 0 on some PVE
+    versions when invoked via the CLI instead of through pvestatd, so we
+    measure usage ourselves between successive cron invocations.
+    """
+    os.makedirs(STATE_DIR, exist_ok=True)
+    state_path = os.path.join(STATE_DIR, "cpu_stat")
+
+    with open("/proc/stat") as f:
+        values = [int(x) for x in f.readline().split()[1:]]
+    idle = values[3] + values[4]  # idle + iowait
+    total = sum(values)
+
+    prev = None
+    if os.path.exists(state_path):
+        try:
+            with open(state_path) as f:
+                prev = tuple(int(x) for x in f.read().split())
+        except (ValueError, OSError):
+            prev = None
+
+    with open(state_path, "w") as f:
+        f.write(f"{idle} {total}")
+
+    if prev is None or len(prev) != 2:
+        return None
+    prev_idle, prev_total = prev
+    delta_idle = idle - prev_idle
+    delta_total = total - prev_total
+    if delta_total <= 0:
+        return None
+    return round((1 - delta_idle / delta_total) * 100, 1)
+
+
 def get_disk_usage_root():
     try:
         out = subprocess.check_output(["df", "--output=pcent", "/"])
@@ -79,7 +116,7 @@ def get_disk_usage_root():
 
 def build_payload(node):
     status = get_node_status(node)
-    cpu_pct = round(status.get("cpu", 0) * 100, 1)
+    cpu_pct = get_cpu_percent()
     mem = status.get("memory", {})
     mem_total = mem.get("total", 0)
     mem_used = mem.get("used", 0)
