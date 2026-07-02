@@ -1,0 +1,11 @@
+# pve2mqtt config
+# Copy this file to /etc/pve2mqtt.conf and fill in your real values.
+# Never commit a filled-in /etc/pve2mqtt.conf (plaintext password).
+
+MQTT_HOST=192.168.1.x
+MQTT_PORT=1883
+MQTT_USER=
+MQTT_PASS=
+MQTT_TOPIC_PREFIX=proxmox
+PVE_NODE=
+HA_DISCOVERY=true

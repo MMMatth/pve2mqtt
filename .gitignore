@@ -1,0 +1,4 @@
+pve2mqtt.conf
+*.log
+__pycache__/
+*.pyc
