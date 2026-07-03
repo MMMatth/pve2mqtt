@@ -21,6 +21,17 @@ apt-get install -y -qq python3-pip lm-sensors >/dev/null
 pip3 install --break-system-packages --root-user-action=ignore --quiet paho-mqtt
 sensors-detect --auto >/dev/null 2>&1 || true
 
+# --- HDD Temperature Kernel Module ---
+echo "Configuring drivetemp module for HDD/SSD temperature monitoring..."
+modprobe drivetemp || true
+if [[ -f /etc/modules ]]; then
+  if ! grep -q "^drivetemp" /etc/modules; then
+    echo "drivetemp" >> /etc/modules
+  fi
+else
+  echo "drivetemp" >> /etc/modules
+fi
+
 # --- Script ---
 install -m 755 pve2mqtt.py /usr/local/bin/pve2mqtt.py
 

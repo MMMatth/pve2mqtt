@@ -57,7 +57,7 @@ def get_hwmon_readings():
                 for k, v in values.items():
                     if not isinstance(v, (int, float)) or not k.endswith("_input"):
                         continue
-                    clean_label = f"{chip}_{label}".replace(" ", "_").replace(":", "").lower()
+                    clean_label = f"{chip}_{label}".replace(" ", "_").replace(":", "").replace("-", "_").lower()
                     clean_label = "".join(c for c in clean_label if c.isalnum() or c == "_")
                     if k.startswith("temp"):
                         temps[clean_label] = round(v, 1)
